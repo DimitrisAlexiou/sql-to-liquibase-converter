@@ -1,4 +1,5 @@
 import re
+import csv
 from datetime import datetime
 
 def clean_sql_content(content):
@@ -34,17 +35,24 @@ class LiquibaseConverter:
 </databaseChangeLog>
 """
 
-    def __init__(self, input_file: str, output_file: str):
+    def __init__(self, input_file: str, output_xml_file: str, output_csv_file: str = None):
         self.input_file = input_file
-        self.output_file = output_file
+        self.output_xml_file = output_xml_file
+        self.output_csv_file = output_csv_file
         self.timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
 
-    def convert_sql_to_liquibase(self):
+    def convert(self):
         """Main conversion method that orchestrates the conversion process."""
         sql_content = self._read_sql_file()
         insert_statements = self._extract_insert_statements(sql_content)
+        
+        # Generate XML
         xml_content = self._generate_xml_content(insert_statements)
         self._write_output_file(xml_content)
+        
+        # Generate CSV if output_csv_file is provided
+        if self.output_csv_file:
+            self._generate_csv_file(insert_statements)
 
     def _read_sql_file(self) -> str:
         """Read and clean SQL content from input file."""
@@ -112,17 +120,43 @@ class LiquibaseConverter:
 
     def _write_output_file(self, content: str):
         """Write the generated XML content to output file."""
-        with open(self.output_file, "w", encoding="utf-8") as output_file:
+        with open(self.output_xml_file, "w", encoding="utf-8") as output_file:
             output_file.write(content)
 
-def convert_sql_to_liquibase(input_file: str, output_file: str):
-    """Main function to convert SQL to Liquibase XML."""
-    converter = LiquibaseConverter(input_file, output_file)
-    converter.convert_sql_to_liquibase()
+    def _generate_csv_file(self, insert_statements: list):
+        """Generate CSV file from INSERT statements."""
+        csv_data = []
+        
+        for table_name, columns, values in insert_statements:
+            columns_list = [col.strip() for col in columns.split(",")]
+            rows = re.findall(r"\((.*?)\)", values, re.DOTALL)
+            
+            for row in rows:
+                values_list = self._parse_values_row(row)
+                # Create a dictionary for each row
+                row_dict = {}
+                for col, val in zip(columns_list, values_list):
+                    row_dict[col] = val if val.upper() != "NULL" else ""
+                csv_data.append(row_dict)
+
+        # Write to CSV file
+        if csv_data:
+            headers = list(csv_data[0].keys())
+            with open(self.output_csv_file, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.DictWriter(csvfile, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(csv_data)
+
+def convert_sql_to_liquibase(input_file: str, output_xml_file: str, output_csv_file: str = None):
+    """Main function to convert SQL to Liquibase XML and optionally to CSV."""
+    converter = LiquibaseConverter(input_file, output_xml_file, output_csv_file)
+    converter.convert()
 
 if __name__ == "__main__":
     input_file = "inserts.sql"
-    output_file = "liquibase_inserts.xml"
+    output_xml_file = "liquibase_inserts.xml"
+    output_csv_file = "inserts.csv"
     
-    convert_sql_to_liquibase(input_file, output_file)
-    print(f"Conversion completed! Check '{output_file}'")
+    convert_sql_to_liquibase(input_file, output_xml_file, output_csv_file)
+    print(f"Conversion completed! Check '{output_xml_file}' for XML output")
+    print(f"CSV file created at '{output_csv_file}'")
